@@ -8,7 +8,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /mnt/ssd/postgres:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_DIR}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - nextcloud
 
@@ -16,9 +22,15 @@ services:
     image: redis:8-alpine
     container_name: nc-redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     volumes:
-      - /mnt/ssd/redis:/data
+      - ${REDIS_DATA_DIR}:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD}' ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - nextcloud
 
@@ -27,8 +39,10 @@ services:
     container_name: nc-app
     restart: unless-stopped
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       POSTGRES_HOST: db
       POSTGRES_DB: ${POSTGRES_DB}
@@ -39,9 +53,18 @@ services:
       NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_TRUSTED_DOMAINS}
       REDIS_HOST: redis
       REDIS_HOST_PASSWORD: ${REDIS_PASSWORD}
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT}
+      PHP_UPLOAD_LIMIT: ${PHP_UPLOAD_LIMIT}
+      APACHE_BODY_LIMIT: ${APACHE_BODY_LIMIT}
     volumes:
-      - /mnt/ssd/nextcloud/app:/var/www/html
-      - /mnt/ssd/nextcloud/data:/var/www/html/data
+      - ${NEXTCLOUD_APP_DIR}:/var/www/html
+      - ${NEXTCLOUD_DATA_DIR}:/var/www/html/data
+    healthcheck:
+      test: ["CMD", "php", "-f", "/var/www/html/occ", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     networks:
       - nextcloud
 
@@ -50,21 +73,25 @@ services:
     container_name: nc-cron
     restart: unless-stopped
     depends_on:
-      - app
+      app:
+        condition: service_started
     entrypoint: /cron.sh
     volumes:
-      - /mnt/ssd/nextcloud/app:/var/www/html
-      - /mnt/ssd/nextcloud/data:/var/www/html/data
+      - ${NEXTCLOUD_APP_DIR}:/var/www/html
+      - ${NEXTCLOUD_DATA_DIR}:/var/www/html/data
     networks:
       - nextcloud
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: ${CLOUDFLARED_IMAGE}
     container_name: nc-cloudflared
     restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - nextcloud
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 
 networks:
   nextcloud:

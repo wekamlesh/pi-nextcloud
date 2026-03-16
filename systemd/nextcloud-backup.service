@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Nextcloud backup
+Wants=docker.service
+After=docker.service mnt-ssd.mount
+Requires=mnt-ssd.mount
+
+[Service]
+Type=oneshot
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/backup.sh
